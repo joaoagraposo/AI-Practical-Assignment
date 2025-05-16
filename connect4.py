@@ -1,5 +1,3 @@
-# Connect-Four com Pure Monte Carlo em Português Europeu
-
 import random
 import time
 from copy import deepcopy

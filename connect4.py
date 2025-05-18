@@ -2,6 +2,11 @@ import random
 import time
 from copy import deepcopy
 
+import pandas as pd
+import numpy as np
+
+from DeciTree import buildTree, classifyExample
+
 # Estado do jogo Connect-Four
 class ConnectFourState:
     ROWS = 6
@@ -48,16 +53,15 @@ class ConnectFourState:
             return 0
         return None
 
-# Função para imprimir o tabuleiro
+# Impressão do tabuleiro
 def print_board(state):
     print('\n  ' + ' '.join(str(c) for c in range(state.COLS)))
     for row in state.board:
         print(' |' + ' '.join('X' if v==1 else 'O' if v==-1 else '.' for v in row) + '|')
     print()
 
-# Pure Monte Carlo Game Search
+# Pure Monte Carlo Search
 def pure_monte_carlo_choice(state, playouts=1000):
-    '''Para cada movimento legal, executa playouts aleatórios e escolhe o movimento com mais vitórias.'''
     best_move, best_wins = None, -1
     for mv in state.get_legal_moves():
         wins = 0
@@ -66,52 +70,79 @@ def pure_monte_carlo_choice(state, playouts=1000):
             sim.play_move(mv)
             while sim.check_win() is None:
                 sim.play_move(random.choice(sim.get_legal_moves()))
+            # ganha quem jogou mv se sim.player foi invertido
             if sim.check_win() == state.player:
                 wins += 1
         if wins > best_wins:
             best_wins, best_move = wins, mv
     return best_move
 
-# Leitura de jogada humana
-def human_move(state):
-    moves = state.get_legal_moves()
-    while True:
-        try:
-            col = int(input(f"Jogador {'1 (X)' if state.player==1 else '2 (O)'}, escolha coluna {moves}: "))
-            if col in moves:
-                return col
-        except ValueError:
-            pass
-        print("Movimento inválido.")
+# Flatten do estado para classificação
+def state_to_series(state, feature_columns):
+    vec = []
+    for row in state.board:
+        vec.extend(row)
+    vec.append(state.player)
+    return pd.Series(vec, index=feature_columns)
 
-# Loop principal do jogo
+# Loop principal
 def play_game():
-    print("=== Connect-Four com Pure Monte Carlo ===")
-    # escolha de modo de jogo
-    while True:
-        mode = input("Modo: 1) PvP  2) PvC\nEscolha: ")
-        if mode in ('1','2'):
-            break
-    playouts = 1000  # número de simulações por movimento
+    print("=== Connect-Four com MCTS e ID3 ===")
+    print("Modo: 1) PvP  2) PvC MCTS  3) C-ID3 vs C-MCTS")
+    mode = input("Escolha: ").strip()
+    while mode not in ('1','2','3'):
+        mode = input("Escolha: ").strip()
+
+    # para modo 3, treinamos a árvore sem discretizar
+    if mode == '3':
+        print("\nTreinando árvore de decisão (ID3)...")
+        df = pd.read_csv("connect4_dataset.csv")
+        # não discretizar com quartis para manter labels inteiros
+        feature_columns = df.columns[:-1]
+        X = df[feature_columns]
+        y = df.iloc[:, -1]
+        max_depth = int(np.log2(len(df)) + 1)
+        training_data = pd.concat([X, y], axis=1)
+        decision_tree = buildTree(training_data, max_depth)
+        print("Árvore treinada!\n")
+
     state = ConnectFourState()
     print_board(state)
+
     while True:
-        if mode == '1' or state.player == 1:
-            mv = human_move(state)
-        else:
-            print("Computador a pensar...")
+        if mode == '1' or (mode == '2' and state.player == 1):
+            # humano
+            col = int(input(f"Jogador {'1 (X)' if state.player==1 else '2 (O)'}, escolha coluna {state.get_legal_moves()}: "))
+
+        elif mode == '2' and state.player == -1:
+            # PvC MCTS
+            print("Computador (MCTS) a pensar...")
             start = time.time()
-            mv = pure_monte_carlo_choice(state, playouts)
+            col = pure_monte_carlo_choice(state, playouts=1000)
             print(f"Tempo de cálculo: {time.time() - start:.2f}s")
-        state.play_move(mv)
+
+        else:
+            # modo 3
+            if state.player == 1:
+                print("Computador (ID3) a pensar...")
+                example = state_to_series(state, feature_columns)
+                # classifyExample retorna já inteiro
+                col = int(classifyExample(example, decision_tree))
+            else:
+                print("Computador (MCTS) a pensar...")
+                start = time.time()
+                col = pure_monte_carlo_choice(state, playouts=1000)
+                print(f"Tempo de cálculo: {time.time() - start:.2f}s")
+
+        state.play_move(col)
         print_board(state)
-        result = state.check_win()
-        if result is not None:
-            if result == 0:
+        res = state.check_win()
+        if res is not None:
+            if res == 0:
                 print("Empate!")
             else:
-                winner = '1 (X)' if result == 1 else '2 (O)'
-                print(f"Vitória do jogador {winner}!")
+                w = '1 (X)' if res == 1 else '2 (O)'
+                print(f"Vitória do jogador {w}!")
             break
 
 if __name__ == '__main__':

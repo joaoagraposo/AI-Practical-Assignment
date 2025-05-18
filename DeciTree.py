@@ -126,4 +126,5 @@ def main():
     print("Accuracy: " , accuracy)
 
 
-main()
+if __name__ == '__main__':
+     main()
